@@ -5,13 +5,15 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "docker:build": "docker build -t server .",
+    "docker:start": "docker run -it server",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "mediasoup": "^3.9.5",
+    "mediasoup": "^3.10.5",
     "shelljs": "^0.8.5",
     "uuid": "^8.3.2",
     "ws": "^8.4.2"
