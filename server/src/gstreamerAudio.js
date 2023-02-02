@@ -12,8 +12,8 @@ const GSTREAMER_COMMAND = 'gst-launch-1.0';
 const GSTREAMER_OPTIONS = '-v -e';
 
 module.exports = class GStreamerAudio {
-    constructor (port, codec, dest) {
-        this.port = port;
+    constructor (ports, codec, dest) {
+        this.ports = ports;
         this.codec = codec;
         this.dest = dest;
       this._process = undefined;
@@ -68,8 +68,11 @@ module.exports = class GStreamerAudio {
     get _commandArgs () {
         const clockRate = this.codec.clockRate;
         const pt = this.codec.preferredPayloadType;
-        let commandArgs = [
-            `rtpbin name=rtpbin udpsrc port=${this.port} caps="application/x-rtp,media=audio,clock-rate=${clockRate},encoding-name=OPUS,payload=${pt}"`,
+        let commandArgs = [];
+        console.log('this.ports', this.ports);
+        for (let port of this.ports) {
+          commandArgs = commandArgs.concat([
+            `rtpbin name=rtpbin udpsrc port=${port} caps="application/x-rtp,media=audio,clock-rate=${clockRate},encoding-name=OPUS,payload=${pt}"`,
             '!',
             "rtpbin.recv_rtp_sink_0 rtpbin.",
             '!',
@@ -83,8 +86,8 @@ module.exports = class GStreamerAudio {
             "oggmux",
             '!',
             `filesink location=${this.dest}`
-          ];
-    
+          ])
+        }
         return commandArgs;
       }
 }

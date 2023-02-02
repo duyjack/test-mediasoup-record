@@ -280,8 +280,10 @@ const startRecord = async (peer) => {
 
   for (let peer of peers.values()) {
     for (const producer of peer.producers) {
-      const rtpInfo = await publishProducerRtpStream(peer, producer);
-      recordInfo.ports = recordInfo.ports.concat(rtpInfo.port);
+      if (producer.kind == 'audio') {
+        const rtpInfo = await publishProducerRtpStream(peer, producer);
+        recordInfo.ports = recordInfo.ports.concat(rtpInfo.port);
+      }
     }
   }
 
@@ -303,7 +305,7 @@ const startRecord = async (peer) => {
 const getProcess = (fileName, ports) => {
   switch (PROCESS_NAME) {
     case 'GStreamer':
-      return new GStreamerAudio(ports[0], router.rtpCapabilities.codecs[0], `./file/${fileName}.ogg`);
+      return new GStreamerAudio(ports, router.rtpCapabilities.codecs[0], `./files/${fileName}.ogg`);
     case 'FFmpeg':
     default:
       // return new FFmpeg(recordInfo);
