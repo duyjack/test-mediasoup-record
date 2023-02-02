@@ -16,6 +16,7 @@ const {
   getPort,
   releasePort
 } = require('./port');
+const GStreamerAudio = require('./gstreamerAudio');
 
 const PROCESS_NAME = process.env.PROCESS_NAME || 'FFmpeg';
 const SERVER_PORT = process.env.SERVER_PORT || 3000;
@@ -24,11 +25,12 @@ const HTTPS_OPTIONS = Object.freeze({
   key: fs.readFileSync('./ssl/server.key')
 });
 
-const httpsServer = https.createServer(HTTPS_OPTIONS);
-const wss = new WebSocket.Server({ server: httpsServer });
+// const httpsServer = https.createServer(HTTPS_OPTIONS);
+const wss = new WebSocket.Server({ port: SERVER_PORT });
 const peers = new Map();
 
 let router;
+let processRecord;
 
 wss.on('connection', async (socket, request) => {
   console.log('new socket connection [ip%s]', request.headers['x-forwared-for'] || request.headers.origin);
@@ -75,10 +77,10 @@ wss.on('connection', async (socket, request) => {
 
     const peer = peers.get(socket.sessionId);
 
-    if (peer && peer.process) {
-      peer.process.kill();
-      peer.process = undefined;
-    }
+    // if (peer && peer.process) {
+    //   peer.process.kill();
+    //   peer.process = undefined;
+    // }
   });
 });
 
@@ -186,12 +188,17 @@ const handleStopRecordRequest = async (jsonMessage) => {
     throw new Error(`Peer with id ${jsonMessage.sessionId} was not found`);
   }
 
-  if (!peer.process) {
-    throw new Error(`Peer with id ${jsonMessage.sessionId} is not recording`);
+  // if (!peer.process) {
+  //   throw new Error(`Peer with id ${jsonMessage.sessionId} is not recording`);
+  // }
+
+  if (processRecord) {
+    processRecord.kill();
+    processRecord = undefined;
   }
 
-  peer.process.kill();
-  peer.process = undefined;
+  // peer.process.kill();
+  // peer.process = undefined;
 
   // Release ports from port set
   for (const remotePort of peer.remotePorts) {
@@ -260,20 +267,27 @@ const publishProducerRtpStream = async (peer, producer, ffmpegRtpCapabilities) =
     remoteRtcpPort,
     localRtcpPort: rtpTransport.rtcpTuple ? rtpTransport.rtcpTuple.localPort : undefined,
     rtpCapabilities,
-    rtpParameters: rtpConsumer.rtpParameters
+    rtpParameters: rtpConsumer.rtpParameters,
+    port: rtpTransport.tuple.remotePort,
   };
 };
 
 const startRecord = async (peer) => {
-  let recordInfo = {};
+  let recordInfo = {
+    fileName: Date.now().toString(),
+    ports: [],
+  };
 
-  for (const producer of peer.producers) {
-    recordInfo[producer.kind] = await publishProducerRtpStream(peer, producer);
+  for (let peer of peers.values()) {
+    for (const producer of peer.producers) {
+      const rtpInfo = await publishProducerRtpStream(peer, producer);
+      recordInfo.ports = recordInfo.ports.concat(rtpInfo.port);
+    }
   }
 
   recordInfo.fileName = Date.now().toString();
 
-  peer.process = getProcess(recordInfo);
+  processRecord = getProcess(recordInfo.fileName, recordInfo.ports);
 
   setTimeout(async () => {
     for (const consumer of peer.consumers) {
@@ -286,13 +300,13 @@ const startRecord = async (peer) => {
 };
 
 // Returns process command to use (GStreamer/FFmpeg) default is FFmpeg
-const getProcess = (recordInfo) => {
+const getProcess = (fileName, ports) => {
   switch (PROCESS_NAME) {
     case 'GStreamer':
-      return new GStreamer(recordInfo);
+      return new GStreamerAudio(ports[0], router.rtpCapabilities.codecs[0], `./file/${fileName}.ogg`);
     case 'FFmpeg':
     default:
-      return new FFmpeg(recordInfo);
+      // return new FFmpeg(recordInfo);
   }
 };
 
@@ -302,9 +316,9 @@ const getProcess = (recordInfo) => {
     await initializeWorkers();
     router = await createRouter();
 
-    httpsServer.listen(SERVER_PORT, () =>
-      console.log('Socket Server listening on port %d', SERVER_PORT)
-    );
+    // httpsServer.listen(SERVER_PORT, () =>
+    //   console.log('Socket Server listening on port %d', SERVER_PORT)
+    // );
   } catch (error) {
     console.error('Failed to initialize application [error:%o] destroying in 2 seconds...', error);
     setTimeout(() => process.exit(1), 2000);
