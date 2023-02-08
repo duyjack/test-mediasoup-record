@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const https = require('https');
 const WebSocket = require('ws');
@@ -334,7 +335,7 @@ const startRecord = async () => {
 const getProcess = (fileName, port) => {
   switch (PROCESS_NAME) {
     case 'GStreamer':
-      return new GStreamerAudio(port, router.rtpCapabilities.codecs[0], `./files/${fileName}.ogg`);
+      return new GStreamerAudio(port, router.rtpCapabilities.codecs[0], `${process.env.RECORD_FILE_LOCATION_PATH}/${fileName}.ogg`);
     case 'FFmpeg':
     default:
     // return new FFmpeg(recordInfo);

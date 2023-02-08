@@ -1,21 +1,20 @@
 
+require('dotenv').config();
 const child_process = require('child_process');
 const { EventEmitter } = require('events');
 const shell = require('shelljs');
 
 const { getCodecInfoFromRtpParameters } = require('./utils');
 
-const RECORD_FILE_LOCATION_PATH = process.env.RECORD_FILE_LOCATION_PATH || './files';
-
 const GSTREAMER_DEBUG_LEVEL = process.env.GSTREAMER_DEBUG_LEVEL || 3;
-const GSTREAMER_COMMAND = 'gst-launch-1.0';
-const GSTREAMER_OPTIONS = '-v -e';
+const GSTREAMER_COMMAND = process.env.GSTREAMER_COMMAND;
+const GSTREAMER_OPTIONS = process.env.GSTREAMER_OPTIONS;
 
 module.exports = class GStreamerAudio {
     constructor (port, codec, dest) {
-        this.port = port;
-        this.codec = codec;
-        this.dest = dest;
+      this.port = port;
+      this.codec = codec;
+      this.dest = dest;
       this._process = undefined;
       this._observer = new EventEmitter();
       this._createProcess();
