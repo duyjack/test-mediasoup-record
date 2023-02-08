@@ -26,8 +26,8 @@ const handleSocketMessage = async (message) => {
 
 const handleSocketClose = () => {
   console.log('handleSocketClose()');
-  document.getElementById('startRecordButton').disabled = true;
-  document.getElementById('stopRecordButton').disabled = true;
+  // document.getElementById('startRecordButton').disabled = true;
+  // document.getElementById('stopRecordButton').disabled = true;
 };
 
 const getVideoCodecs = () => {
@@ -155,8 +155,8 @@ const getMediaStream = async () => {
     peer.producers.push(audioProducer);
   }
 
-  // Enable the start record button
-  document.getElementById('startRecordButton').disabled = false;
+  // // Enable the start record button
+  // document.getElementById('startRecordButton').disabled = false;
 };
 
 const handleConnectTransportRequest = async (jsonMessage) => {
@@ -249,8 +249,8 @@ module.exports.startRecord = () => {
     sessionId: peer.sessionId,
   }));
 
-  document.getElementById('startRecordButton').disabled = true;
-  document.getElementById('stopRecordButton').disabled = false;
+  // document.getElementById('startRecordButton').disabled = true;
+  // document.getElementById('stopRecordButton').disabled = false;
 };
 
 module.exports.stopRecord = () => {
@@ -261,6 +261,6 @@ module.exports.stopRecord = () => {
     sessionId: peer.sessionId
   }));
 
-  document.getElementById('startRecordButton').disabled = false;
-  document.getElementById('stopRecordButton').disabled = true;
+  // document.getElementById('startRecordButton').disabled = false;
+  // document.getElementById('stopRecordButton').disabled = true;
 };

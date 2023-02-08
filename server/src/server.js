@@ -28,9 +28,10 @@ const HTTPS_OPTIONS = Object.freeze({
 // const httpsServer = https.createServer(HTTPS_OPTIONS);
 const wss = new WebSocket.Server({ port: SERVER_PORT });
 const peers = new Map();
+const scenarios = {};
+let scene = 1;
 
 let router;
-let processRecord;
 
 wss.on('connection', async (socket, request) => {
   console.log('new socket connection [ip%s]', request.headers['x-forwared-for'] || request.headers.origin);
@@ -76,11 +77,20 @@ wss.on('connection', async (socket, request) => {
     console.log('socket::close [sessionId:%s]', socket.sessionId);
 
     const peer = peers.get(socket.sessionId);
-
-    // if (peer && peer.process) {
-    //   peer.process.kill();
-    //   peer.process = undefined;
-    // }
+    if (scenarios[scene]) {
+      const end = Date.now().toString();
+      for (let voice of Object.values(scenarios[scene].voices)) {
+        if (voice.id.includes(peer.sessionId)) {
+          if (!voice.end) {
+            voice.end = end;
+          }
+        }
+      }
+    }
+    if (peer && peer.process) {
+      peer.process.kill();
+      peer.process = undefined;
+    }
   });
 });
 
@@ -177,33 +187,40 @@ const handleStartRecordRequest = async (jsonMessage) => {
     throw new Error(`Peer with id ${jsonMessage.sessionId} was not found`);
   }
 
-  startRecord(peer);
+  startRecord();
 };
 
 const handleStopRecordRequest = async (jsonMessage) => {
   console.log('handleStopRecordRequest() [data:%o]', jsonMessage);
-  const peer = peers.get(jsonMessage.sessionId);
+  // const peer = peers.get(jsonMessage.sessionId);
 
-  if (!peer) {
-    throw new Error(`Peer with id ${jsonMessage.sessionId} was not found`);
-  }
+  // if (!peer) {
+  //   throw new Error(`Peer with id ${jsonMessage.sessionId} was not found`);
+  // }
 
   // if (!peer.process) {
   //   throw new Error(`Peer with id ${jsonMessage.sessionId} is not recording`);
   // }
-
-  if (processRecord) {
-    processRecord.kill();
-    processRecord = undefined;
+  const timeEnd = Date.now();
+  for (let peer of peers.values()) {
+    peer.process.kill();
+    peer.process = undefined;
+    // Release ports from port set
+    for (const remotePort of peer.remotePorts) {
+      releasePort(remotePort);
+    }
+    console.log('scenarios[scene].voices', scenarios[scene].voices);
+    for (let voice of Object.values(scenarios[scene].voices)) {
+      console.log('keyVoice ', voice.id);
+      if (!voice.end) {
+        voice.end = timeEnd.toString();
+      }
+      break;
+    }
   }
-
-  // peer.process.kill();
-  // peer.process = undefined;
-
-  // Release ports from port set
-  for (const remotePort of peer.remotePorts) {
-    releasePort(remotePort);
-  }
+  scenarios[scene].end = timeEnd.toString();
+  console.log('scenarios ', JSON.stringify(scenarios));
+  scene++;
 };
 
 const publishProducerRtpStream = async (peer, producer, ffmpegRtpCapabilities) => {
@@ -272,43 +289,55 @@ const publishProducerRtpStream = async (peer, producer, ffmpegRtpCapabilities) =
   };
 };
 
-const startRecord = async (peer) => {
-  let recordInfo = {
-    fileName: Date.now().toString(),
-    ports: [],
-  };
-
+const startRecord = async () => {
+  if (!scenarios[scene]){
+    scenarios[scene] = new Scene();
+  }
   for (let peer of peers.values()) {
+    let recordInfo = {};
     for (const producer of peer.producers) {
       if (producer.kind == 'audio') {
-        const rtpInfo = await publishProducerRtpStream(peer, producer);
-        recordInfo.ports = recordInfo.ports.concat(rtpInfo.port);
+        if (peer.process) {
+          continue;
+        }
+        recordInfo[producer.kind] = await publishProducerRtpStream(peer, producer);
+
+        const voice = new Voice();
+        const startTime = Date.now();
+        voice.id = peer.sessionId + '_' + startTime.toString();
+        voice.start = startTime.toString();
+        recordInfo.fileName = peer.sessionId + '_' + startTime.toString();
+        const sceneObj = scenarios[scene];
+        if (!sceneObj.start) {
+          sceneObj.start = startTime.toString();
+        }
+        voice.audio = `${recordInfo.fileName}.ogg`;
+        sceneObj.voices[voice.id] = voice;
+
+        console.log(`scenarios ${scene}`, JSON.stringify(scenarios[scene]));
+
+        peer.process = getProcess(recordInfo.fileName, recordInfo.audio.port);
+        let timeoutProcess;
+        timeoutProcess = setTimeout(async () => {
+          for (const consumer of peer.consumers) {
+            await consumer.resume();
+            await consumer.requestKeyFrame();
+            clearTimeout(timeoutProcess);
+          }
+        }, 1000);
       }
     }
   }
-
-  recordInfo.fileName = Date.now().toString();
-
-  processRecord = getProcess(recordInfo.fileName, recordInfo.ports);
-
-  setTimeout(async () => {
-    for (const consumer of peer.consumers) {
-      // Sometimes the consumer gets resumed before the GStreamer process has fully started
-      // so wait a couple of seconds
-      await consumer.resume();
-      await consumer.requestKeyFrame();
-    }
-  }, 1000);
 };
 
 // Returns process command to use (GStreamer/FFmpeg) default is FFmpeg
-const getProcess = (fileName, ports) => {
+const getProcess = (fileName, port) => {
   switch (PROCESS_NAME) {
     case 'GStreamer':
-      return new GStreamerAudio(ports, router.rtpCapabilities.codecs[0], `./files/${fileName}.ogg`);
+      return new GStreamerAudio(port, router.rtpCapabilities.codecs[0], `./files/${fileName}.ogg`);
     case 'FFmpeg':
     default:
-      // return new FFmpeg(recordInfo);
+    // return new FFmpeg(recordInfo);
   }
 };
 
@@ -326,3 +355,33 @@ const getProcess = (fileName, ports) => {
     setTimeout(() => process.exit(1), 2000);
   }
 })();
+
+class Scene {
+  constructor() {
+      this.id;
+      this.start;
+      this.end;
+      this.sharescreens = {};
+      this.voices = {};
+  }
+}
+
+class ShareScreen {
+  constructor() {
+      this.id;
+      this.start;
+      this.end;
+      this.video;
+      this.audio;
+  }
+}
+
+class Voice {
+  constructor() {
+      this.id;
+      this.start;
+      this.end;
+      this.audio;
+  }
+}
+
