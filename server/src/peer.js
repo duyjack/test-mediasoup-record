@@ -3,11 +3,20 @@
 module.exports = class Peer {
   constructor (sessionId) {
     this.sessionId = sessionId;
+    this.roomId = null;
     this.transports = [];
     this.producers = [];
     this.consumers = [];
     this.process = undefined;
     this.remotePorts = [];
+  }
+
+  setRoomId(roomId) {
+    this.roomId = roomId;
+  }
+
+  getRoomId() {
+    return this.roomId;
   }
 
   addTransport (transport) {

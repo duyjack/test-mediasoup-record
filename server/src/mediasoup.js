@@ -6,9 +6,14 @@ console.log('mediasoup loaded [version:%s]', mediasoup.version);
 
 let workers = [];
 let nextWorkerIndex = 0;
+let initialized = false;
 
 // Start the mediasoup workers
 module.exports.initializeWorkers = async () => {
+  if (initialized) {
+    return;
+  }
+  initialized = true;
   const { logLevel, logTags, rtcMinPort, rtcMaxPort } = config.worker;
 
   console.log('initializeWorkers() creating %d mediasoup workers', config.numWorkers);
@@ -57,3 +62,10 @@ const getNextWorker = () => {
 
   return worker;
 };
+
+module.exports.createPipeTransport = async (router, listenIp) => {
+  const transport = await router.createPipeTransport({
+    listenIp
+  });
+  return transport;
+}

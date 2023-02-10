@@ -31,6 +31,7 @@ COPY . .
 # install modules
 RUN npm install
 
+EXPOSE 3000
 
 # run server
 CMD ["/bin/bash", "start.sh"]

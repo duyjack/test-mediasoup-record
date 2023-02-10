@@ -10,7 +10,8 @@ const GStreamer = require('./gstreamer');
 const {
   initializeWorkers,
   createRouter,
-  createTransport
+  createTransport,
+  createPipeTransport
 } = require('./mediasoup');
 const Peer = require('./peer');
 const {
@@ -18,6 +19,7 @@ const {
   releasePort
 } = require('./port');
 const GStreamerAudio = require('./gstreamerAudio');
+const recordService = require('./recordService');
 
 const PROCESS_NAME = process.env.PROCESS_NAME || 'FFmpeg';
 const SERVER_PORT = process.env.SERVER_PORT || 3000;
@@ -33,6 +35,8 @@ const scenarios = {};
 let scene = 1;
 
 let router;
+
+let pipeTransport;
 
 wss.on('connection', async (socket, request) => {
   console.log('new socket connection [ip%s]', request.headers['x-forwared-for'] || request.headers.origin);
@@ -120,6 +124,17 @@ const handleCreateTransportRequest = async (jsonMessage) => {
   const peer = peers.get(jsonMessage.sessionId);
   peer.addTransport(transport);
 
+  // createPipeTransport
+  pipeTransport = await createPipeTransport(router, '127.0.0.1');
+  const { ip, port } = await recordService.createPipeTransportAndConnect(peer.sessionId, pipeTransport.tuple.localIp, pipeTransport.tuple.localPort);
+  pipeTransport.connect({
+    ip: ip,
+    port: port,
+  });
+  pipeTransport.observer.on('close', () => {
+    // TODO
+  });
+
   return {
     action: 'create-transport',
     id: transport.id,
@@ -171,6 +186,25 @@ const handleProduceRequest = async (jsonMessage) => {
 
   peer.addProducer(producer);
 
+  try {
+    let pipeConsumer = await pipeTransport.consume({
+      producerId: producer.id,
+      paused: producer.paused
+    });
+    await recordService.pipeProducerToConsumer(peer.sessionId, producer.id, pipeConsumer.kind, pipeConsumer.rtpParameters, producer.appData, pipeConsumer.producerPaused);
+    pipeConsumer.observer.on('close', () => {
+      // TODO
+    });
+    pipeConsumer.observer.on('pause', () => {
+      // TODO
+    });
+    pipeConsumer.observer.on('resume', () => {
+      // TODO
+    });
+  } catch (err) {
+    console.log('err', err);
+  }
+
   console.log('handleProducerRequest() new producer added [id:%s, kind:%s]', producer.id, producer.kind);
 
   return {
@@ -202,133 +236,76 @@ const handleStopRecordRequest = async (jsonMessage) => {
   // if (!peer.process) {
   //   throw new Error(`Peer with id ${jsonMessage.sessionId} is not recording`);
   // }
-  const timeEnd = Date.now();
-  for (let peer of peers.values()) {
-    peer.process.kill();
-    peer.process = undefined;
-    // Release ports from port set
-    for (const remotePort of peer.remotePorts) {
-      releasePort(remotePort);
-    }
-    console.log('scenarios[scene].voices', scenarios[scene].voices);
-    for (let voice of Object.values(scenarios[scene].voices)) {
-      console.log('keyVoice ', voice.id);
-      if (!voice.end) {
-        voice.end = timeEnd.toString();
-      }
-      break;
-    }
-  }
-  scenarios[scene].end = timeEnd.toString();
-  console.log('scenarios ', JSON.stringify(scenarios));
-  scene++;
-};
-
-const publishProducerRtpStream = async (peer, producer, ffmpegRtpCapabilities) => {
-  console.log('publishProducerRtpStream()');
-
-  // Create the mediasoup RTP Transport used to send media to the GStreamer process
-  const rtpTransportConfig = config.plainRtpTransport;
-
-  // If the process is set to GStreamer set rtcpMux to false
-  if (PROCESS_NAME === 'GStreamer') {
-    rtpTransportConfig.rtcpMux = false;
-  }
-
-  const rtpTransport = await createTransport('plain', router, rtpTransportConfig);
-
-  // Set the receiver RTP ports
-  const remoteRtpPort = await getPort();
-  peer.remotePorts.push(remoteRtpPort);
-
-  let remoteRtcpPort;
-  // If rtpTransport rtcpMux is false also set the receiver RTCP ports
-  if (!rtpTransportConfig.rtcpMux) {
-    remoteRtcpPort = await getPort();
-    peer.remotePorts.push(remoteRtcpPort);
-  }
-
-
-  // Connect the mediasoup RTP transport to the ports used by GStreamer
-  await rtpTransport.connect({
-    ip: '127.0.0.1',
-    port: remoteRtpPort,
-    rtcpPort: remoteRtcpPort
-  });
-
-  peer.addTransport(rtpTransport);
-
-  const codecs = [];
-  // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
-  const routerCodec = router.rtpCapabilities.codecs.find(
-    codec => codec.kind === producer.kind
-  );
-  codecs.push(routerCodec);
-
-  const rtpCapabilities = {
-    codecs,
-    rtcpFeedback: []
-  };
-
-  // Start the consumer paused
-  // Once the gstreamer process is ready to consume resume and send a keyframe
-  const rtpConsumer = await rtpTransport.consume({
-    producerId: producer.id,
-    rtpCapabilities,
-    paused: true
-  });
-
-  peer.consumers.push(rtpConsumer);
-
-  return {
-    remoteRtpPort,
-    remoteRtcpPort,
-    localRtcpPort: rtpTransport.rtcpTuple ? rtpTransport.rtcpTuple.localPort : undefined,
-    rtpCapabilities,
-    rtpParameters: rtpConsumer.rtpParameters,
-    port: rtpTransport.tuple.remotePort,
-  };
+  recordService.stopRecord('1');
+  // const timeEnd = Date.now();
+  // for (let peer of peers.values()) {
+  //   peer.process.kill();
+  //   peer.process = undefined;
+  //   // Release ports from port set
+  //   for (const remotePort of peer.remotePorts) {
+  //     releasePort(remotePort);
+  //   }
+  //   console.log('scenarios[scene].voices', scenarios[scene].voices);
+  //   for (let voice of Object.values(scenarios[scene].voices)) {
+  //     console.log('keyVoice ', voice.id);
+  //     if (!voice.end) {
+  //       voice.end = timeEnd.toString();
+  //     }
+  //     break;
+  //   }
+  // }
+  // scenarios[scene].end = timeEnd.toString();
+  // console.log('scenarios ', JSON.stringify(scenarios));
+  // scene++;
 };
 
 const startRecord = async () => {
-  if (!scenarios[scene]){
-    scenarios[scene] = new Scene();
-  }
   for (let peer of peers.values()) {
-    let recordInfo = {};
     for (const producer of peer.producers) {
       if (producer.kind == 'audio') {
-        if (peer.process) {
-          continue;
-        }
-        recordInfo[producer.kind] = await publishProducerRtpStream(peer, producer);
-
-        const voice = new Voice();
-        const startTime = Date.now();
-        voice.id = peer.sessionId + '_' + startTime.toString();
-        voice.start = startTime.toString();
-        recordInfo.fileName = peer.sessionId + '_' + startTime.toString();
-        const sceneObj = scenarios[scene];
-        if (!sceneObj.start) {
-          sceneObj.start = startTime.toString();
-        }
-        voice.audio = `${recordInfo.fileName}.ogg`;
-        sceneObj.voices[voice.id] = voice;
-
-        console.log(`scenarios ${scene}`, JSON.stringify(scenarios[scene]));
-
-        peer.process = getProcess(recordInfo.fileName, recordInfo.audio.port);
-        let timeoutProcess;
-        timeoutProcess = setTimeout(async () => {
-          for (const consumer of peer.consumers) {
-            await consumer.resume();
-            await consumer.requestKeyFrame();
-            clearTimeout(timeoutProcess);
-          }
-        }, 1000);
+        recordService.record('1', peer.sessionId, producer.kind, producer.id);
       }
     }
   }
+
+  // if (!scenarios[scene]){
+  //   scenarios[scene] = new Scene();
+  // }
+  // for (let peer of peers.values()) {
+  //   let recordInfo = {};
+  //   for (const producer of peer.producers) {
+  //     if (producer.kind == 'audio') {
+  //       if (peer.process) {
+  //         continue;
+  //       }
+  //       recordInfo[producer.kind] = await publishProducerRtpStream(peer, producer);
+
+  //       const voice = new Voice();
+  //       const startTime = Date.now();
+  //       voice.id = peer.sessionId + '_' + startTime.toString();
+  //       voice.start = startTime.toString();
+  //       recordInfo.fileName = peer.sessionId + '_' + startTime.toString();
+  //       const sceneObj = scenarios[scene];
+  //       if (!sceneObj.start) {
+  //         sceneObj.start = startTime.toString();
+  //       }
+  //       voice.audio = `${recordInfo.fileName}.ogg`;
+  //       sceneObj.voices[voice.id] = voice;
+
+  //       console.log(`scenarios ${scene}`, JSON.stringify(scenarios[scene]));
+
+  //       peer.process = getProcess(recordInfo.fileName, recordInfo.audio.port);
+  //       let timeoutProcess;
+  //       timeoutProcess = setTimeout(async () => {
+  //         for (const consumer of peer.consumers) {
+  //           await consumer.resume();
+  //           await consumer.requestKeyFrame();
+  //           clearTimeout(timeoutProcess);
+  //         }
+  //       }, 1000);
+  //     }
+  //   }
+  // }
 };
 
 // Returns process command to use (GStreamer/FFmpeg) default is FFmpeg
@@ -345,6 +322,7 @@ const getProcess = (fileName, port) => {
 (async () => {
   try {
     console.log('starting server [processName:%s]', PROCESS_NAME);
+    await recordService.initialize();
     await initializeWorkers();
     router = await createRouter();
 
